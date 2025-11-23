@@ -1,0 +1,6 @@
+.venv/
+data/
+Pretrained_models/
+eval_func/
+models_checkpoint/
+*.pyc

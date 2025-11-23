@@ -20,8 +20,8 @@ SPECIAL_TOKENS = {
 
 def main(args):
     if args.dataset == 'LEVIR_CC':
-        input_captions_json = '/root/Data/LEVIR_CC/LevirCCcaptions.json'
-        input_image_dir = '/root/Data/LEVIR_CC/images'
+        input_captions_json = '/Users/ayushbhauwala/Documents/Columbia/Sem 1/DL for CV/project/experimenting/levir_cc/Levir-CC-dataset/LevirCCcaptions.json'
+        input_image_dir = '/Users/ayushbhauwala/Documents/Columbia/Sem 1/DL for CV/project/experimenting/levir_cc/Levir-CC-dataset/images'
         input_vocab_json = ''
         output_vocab_json = 'vocab.json'
         save_dir = './data/LEVIR_CC/'
