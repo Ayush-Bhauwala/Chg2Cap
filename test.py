@@ -6,6 +6,14 @@ import torch.optim
 from torch.utils import data
 import argparse
 import json
+import numpy as np
+
+from tqdm import tqdm
+
+# Additional imports for NLTK/ROUGE-based metrics (alternative to Java-based METEOR)
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from nltk.translate.meteor_score import meteor_score as nltk_meteor
+from rouge_score import rouge_scorer
 
 # import torchvision.transforms as transforms
 from data.LEVIR_CC.LEVIRCC import LEVIRCCDataset
@@ -22,6 +30,66 @@ elif torch.backends.mps.is_available():
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def evaluate_metrics_nltk(references, hypotheses, word_vocab):
+    """
+    Alternative evaluation using pure Python NLTK/ROUGE implementations.
+    Avoids Java dependencies and broken pipe errors from METEOR.
+    
+    Args:
+        references: list of lists of lists of token IDs [[ref1_tokens, ref2_tokens, ...], ...]
+        hypotheses: list of lists of token IDs [hyp_tokens, ...]
+        word_vocab: dictionary mapping words to token IDs
+    
+    Returns:
+        Dictionary with BLEU-1/2/3/4, METEOR, and ROUGE-L scores
+    """
+    id_to_word = {v: k for k, v in word_vocab.items()}
+    smoothing = SmoothingFunction().method4
+    
+    # Convert token IDs to word lists
+    refs_words = [
+        [[id_to_word.get(tok, '<UNK>') for tok in ref] for ref in refs]
+        for refs in references
+    ]
+    hyps_words = [[id_to_word.get(tok, '<UNK>') for tok in hyp] for hyp in hypotheses]
+    
+    # BLEU scores (corpus-level)
+    bleu1 = corpus_bleu(refs_words, hyps_words, weights=(1, 0, 0, 0), smoothing_function=smoothing)
+    bleu2 = corpus_bleu(refs_words, hyps_words, weights=(0.5, 0.5, 0, 0), smoothing_function=smoothing)
+    bleu3 = corpus_bleu(refs_words, hyps_words, weights=(0.33, 0.33, 0.33, 0), smoothing_function=smoothing)
+    bleu4 = corpus_bleu(refs_words, hyps_words, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=smoothing)
+    
+    # METEOR scores (sentence-level averaged)
+    meteor_scores = []
+    for refs, hyp in zip(refs_words, hyps_words):
+        refs_str = [' '.join(ref) for ref in refs]
+        hyp_str = ' '.join(hyp)
+        try:
+            score = nltk_meteor(refs_str, hyp_str)
+            meteor_scores.append(score)
+        except:
+            meteor_scores.append(0.0)
+    meteor = np.mean(meteor_scores)
+    
+    # ROUGE-L scores
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rouge_scores = []
+    for refs, hyp in zip(refs_words, hyps_words):
+        hyp_str = ' '.join(hyp)
+        scores = [scorer.score(' '.join(ref), hyp_str)['rougeL'].fmeasure for ref in refs]
+        rouge_scores.append(max(scores) if scores else 0.0)
+    rouge_l = np.mean(rouge_scores)
+    
+    return {
+        'Bleu_1': bleu1,
+        'Bleu_2': bleu2,
+        'Bleu_3': bleu3,
+        'Bleu_4': bleu4,
+        'METEOR': meteor,
+        'ROUGE_L': rouge_l
+    }
 
 
 def main(args):
@@ -141,9 +209,9 @@ def main(args):
     nochange_acc = 0
     with torch.no_grad():
         # Batches
-        for ind, (imgA, imgB, token_all, token_all_len, _, _, _) in enumerate(
+        for ind, (imgA, imgB, token_all, token_all_len, _, _, _) in tqdm(enumerate(
             test_loader
-        ):
+        )):
 
             # Move to GPU, if available
             imgA = imgA.to(device)
@@ -154,17 +222,17 @@ def main(args):
             token_all = token_all.squeeze(0).to(device)
             # decode_lengths = max(token_all_len.squeeze(0)).item()
             # Forward prop.
-            print("Using encoder: ", args.network)
-            print("image shapes:", imgA.shape, imgB.shape)
+            # print("Using encoder: ", args.network)
+            # print("image shapes:", imgA.shape, imgB.shape)
             if encoder is not None:
                 feat1, feat2 = encoder(imgA, imgB)
-                print("Encoder output feature shapes:", feat1.shape, feat2.shape)
+                # print("Encoder output feature shapes:", feat1.shape, feat2.shape)
             feat1, feat2 = encoder_trans(feat1, feat2)
-            print(
-                "Encoder-Transformer output feature shapes:", feat1.shape, feat2.shape
-            )
+            # print(
+            #     "Encoder-Transformer output feature shapes:", feat1.shape, feat2.shape
+            # )
             seq = decoder.sample(feat1, feat2)
-            print(seq)
+            # print(seq)
             # print("Decoder output seq shape:", seq.shape)
 
             img_token = token_all.tolist()
@@ -212,8 +280,8 @@ def main(args):
                     ref_captions += (list(word_vocab.keys())[j]) + " "
                 ref_captions += ".    "
 
-            print("Reference Caption:", ref_caption)
-            print("Predicted Caption:", pred_caption)
+            # print("Reference Caption:", ref_caption)
+            # print("Predicted Caption:", pred_caption)
 
             # ## remove
             # print("Remove break.")
@@ -235,72 +303,139 @@ def main(args):
         print("len(nochange_references):", len(nochange_references))
         print("len(change_references):", len(change_references))
 
-        if len(nochange_references) > 0:
-            print("nochange_metric:")
-            nochange_metric = get_eval_score(nochange_references, nochange_hypotheses)
-            Bleu_1 = nochange_metric["Bleu_1"]
-            Bleu_2 = nochange_metric["Bleu_2"]
-            Bleu_3 = nochange_metric["Bleu_3"]
-            Bleu_4 = nochange_metric["Bleu_4"]
-            Meteor = nochange_metric["METEOR"]
-            Rouge = nochange_metric["ROUGE_L"]
-            Cider = nochange_metric["CIDEr"]
-            print(
-                "BLEU-1: {0:.4f}\t"
-                "BLEU-2: {1:.4f}\t"
-                "BLEU-3: {2:.4f}\t"
-                "BLEU-4: {3:.4f}\t"
-                "Meteor: {4:.4f}\t"
-                "Rouge: {5:.4f}\t"
-                "Cider: {6:.4f}\t".format(
-                    Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
-                )
-            )
-            print("nochange_acc:", nochange_acc / len(nochange_references))
-        if len(change_references) > 0:
-            print("change_metric:")
-            change_metric = get_eval_score(change_references, change_hypotheses)
-            Bleu_1 = change_metric["Bleu_1"]
-            Bleu_2 = change_metric["Bleu_2"]
-            Bleu_3 = change_metric["Bleu_3"]
-            Bleu_4 = change_metric["Bleu_4"]
-            Meteor = change_metric["METEOR"]
-            Rouge = change_metric["ROUGE_L"]
-            Cider = change_metric["CIDEr"]
-            print(
-                "BLEU-1: {0:.4f}\t"
-                "BLEU-2: {1:.4f}\t"
-                "BLEU-3: {2:.4f}\t"
-                "BLEU-4: {3:.4f}\t"
-                "Meteor: {4:.4f}\t"
-                "Rouge: {5:.4f}\t"
-                "Cider: {6:.4f}\t".format(
-                    Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
-                )
-            )
-            print("change_acc:", change_acc / len(change_references))
+        # # ========== ORIGINAL EVALUATION (using utils.get_eval_score with Java METEOR) ==========
+        # if len(nochange_references) > 0:
+        #     print("nochange_metric:")
+        #     nochange_metric = get_eval_score(nochange_references, nochange_hypotheses)
+        #     Bleu_1 = nochange_metric["Bleu_1"]
+        #     Bleu_2 = nochange_metric["Bleu_2"]
+        #     Bleu_3 = nochange_metric["Bleu_3"]
+        #     Bleu_4 = nochange_metric["Bleu_4"]
+        #     Meteor = nochange_metric["METEOR"]
+        #     Rouge = nochange_metric["ROUGE_L"]
+        #     Cider = nochange_metric["CIDEr"]
+        #     print(
+        #         "BLEU-1: {0:.4f}\t"
+        #         "BLEU-2: {1:.4f}\t"
+        #         "BLEU-3: {2:.4f}\t"
+        #         "BLEU-4: {3:.4f}\t"
+        #         "Meteor: {4:.4f}\t"
+        #         "Rouge: {5:.4f}\t"
+        #         "Cider: {6:.4f}\t".format(
+        #             Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
+        #         )
+        #     )
+        #     print("nochange_acc:", nochange_acc / len(nochange_references))
+        # if len(change_references) > 0:
+        #     print("change_metric:")
+        #     change_metric = get_eval_score(change_references, change_hypotheses)
+        #     Bleu_1 = change_metric["Bleu_1"]
+        #     Bleu_2 = change_metric["Bleu_2"]
+        #     Bleu_3 = change_metric["Bleu_3"]
+        #     Bleu_4 = change_metric["Bleu_4"]
+        #     Meteor = change_metric["METEOR"]
+        #     Rouge = change_metric["ROUGE_L"]
+        #     Cider = change_metric["CIDEr"]
+        #     print(
+        #         "BLEU-1: {0:.4f}\t"
+        #         "BLEU-2: {1:.4f}\t"
+        #         "BLEU-3: {2:.4f}\t"
+        #         "BLEU-4: {3:.4f}\t"
+        #         "Meteor: {4:.4f}\t"
+        #         "Rouge: {5:.4f}\t"
+        #         "Cider: {6:.4f}\t".format(
+        #             Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
+        #         )
+        #     )
+        #     print("change_acc:", change_acc / len(change_references))
 
-        score_dict = get_eval_score(references, hypotheses)
-        Bleu_1 = score_dict["Bleu_1"]
-        Bleu_2 = score_dict["Bleu_2"]
-        Bleu_3 = score_dict["Bleu_3"]
-        Bleu_4 = score_dict["Bleu_4"]
-        Meteor = score_dict["METEOR"]
-        Rouge = score_dict["ROUGE_L"]
-        Cider = score_dict["CIDEr"]
+        # score_dict = get_eval_score(references, hypotheses)
+        # Bleu_1 = score_dict["Bleu_1"]
+        # Bleu_2 = score_dict["Bleu_2"]
+        # Bleu_3 = score_dict["Bleu_3"]
+        # Bleu_4 = score_dict["Bleu_4"]
+        # Meteor = score_dict["METEOR"]
+        # Rouge = score_dict["ROUGE_L"]
+        # Cider = score_dict["CIDEr"]
+        # print(
+        #     "Testing:\n"
+        #     "Time: {0:.3f}\t"
+        #     "BLEU-1: {1:.4f}\t"
+        #     "BLEU-2: {2:.4f}\t"
+        #     "BLEU-3: {3:.4f}\t"
+        #     "BLEU-4: {4:.4f}\t"
+        #     "Meteor: {5:.4f}\t"
+        #     "Rouge: {6:.4f}\t"
+        #     "Cider: {7:.4f}\t".format(
+        #         test_time, Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
+        #     )
+        # )
+
+        # ========== ALTERNATIVE EVALUATION (using NLTK/ROUGE, no Java dependencies) ==========
+        print("\n" + "="*80)
+        print("ALTERNATIVE METRICS (NLTK/ROUGE - no Java dependencies):")
+        print("="*80)
+        
+        # Overall metrics
+        nltk_metrics = evaluate_metrics_nltk(references, hypotheses, word_vocab)
         print(
-            "Testing:\n"
-            "Time: {0:.3f}\t"
-            "BLEU-1: {1:.4f}\t"
-            "BLEU-2: {2:.4f}\t"
-            "BLEU-3: {3:.4f}\t"
-            "BLEU-4: {4:.4f}\t"
-            "Meteor: {5:.4f}\t"
-            "Rouge: {6:.4f}\t"
-            "Cider: {7:.4f}\t".format(
-                test_time, Bleu_1, Bleu_2, Bleu_3, Bleu_4, Meteor, Rouge, Cider
+            "Overall Testing (NLTK/ROUGE):\n"
+            "BLEU-1: {0:.4f}\t"
+            "BLEU-2: {1:.4f}\t"
+            "BLEU-3: {2:.4f}\t"
+            "BLEU-4: {3:.4f}\t"
+            "METEOR: {4:.4f}\t"
+            "ROUGE-L: {5:.4f}".format(
+                nltk_metrics['Bleu_1'],
+                nltk_metrics['Bleu_2'],
+                nltk_metrics['Bleu_3'],
+                nltk_metrics['Bleu_4'],
+                nltk_metrics['METEOR'],
+                nltk_metrics['ROUGE_L']
             )
         )
+        
+        # No-change metrics
+        if len(nochange_references) > 0:
+            nltk_nochange = evaluate_metrics_nltk(nochange_references, nochange_hypotheses, word_vocab)
+            print(
+                "\nNo-change (NLTK/ROUGE):\n"
+                "BLEU-1: {0:.4f}\t"
+                "BLEU-2: {1:.4f}\t"
+                "BLEU-3: {2:.4f}\t"
+                "BLEU-4: {3:.4f}\t"
+                "METEOR: {4:.4f}\t"
+                "ROUGE-L: {5:.4f}".format(
+                    nltk_nochange['Bleu_1'],
+                    nltk_nochange['Bleu_2'],
+                    nltk_nochange['Bleu_3'],
+                    nltk_nochange['Bleu_4'],
+                    nltk_nochange['METEOR'],
+                    nltk_nochange['ROUGE_L']
+                )
+            )
+        
+        # Change metrics
+        if len(change_references) > 0:
+            nltk_change = evaluate_metrics_nltk(change_references, change_hypotheses, word_vocab)
+            print(
+                "\nChange (NLTK/ROUGE):\n"
+                "BLEU-1: {0:.4f}\t"
+                "BLEU-2: {1:.4f}\t"
+                "BLEU-3: {2:.4f}\t"
+                "BLEU-4: {3:.4f}\t"
+                "METEOR: {4:.4f}\t"
+                "ROUGE-L: {5:.4f}".format(
+                    nltk_change['Bleu_1'],
+                    nltk_change['Bleu_2'],
+                    nltk_change['Bleu_3'],
+                    nltk_change['Bleu_4'],
+                    nltk_change['METEOR'],
+                    nltk_change['ROUGE_L']
+                )
+            )
+        
+        print("="*80 + "\n")
 
 
 if __name__ == "__main__":
