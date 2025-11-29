@@ -213,7 +213,7 @@ def main():
         vocab_file=VOCAB_FILE,
         split='train',
         max_seq_len=MAX_SEQ_LEN,
-        sample_one_caption=fale
+        sample_one_caption=True
     )
     
     val_dataset = ChangeDetectionCaptionDataset(
