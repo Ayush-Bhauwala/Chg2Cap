@@ -29,6 +29,7 @@ markupsafe
 matplotlib
 mpmath
 networkx
+nltk
 numpy
 nvidia-cublas-cu12
 nvidia-cuda-cupti-cu12
@@ -57,6 +58,7 @@ python-dotenv
 pyyaml
 regex
 requests
+rouge_score
 rsa
 safetensors
 scikit-image

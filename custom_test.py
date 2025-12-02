@@ -188,9 +188,23 @@ def test(model, encoder, encoder_trans, dataloader, word_vocab, device, verbose=
 
     references = []
     hypotheses = []
+    change_references = []
+    change_hypotheses = []
+    nochange_references = []
+    nochange_hypotheses = []
+
+    # No-change captions list for LEVIR-CC
+    nochange_list = [
+        "the scene is the same as before",
+        "there is no difference",
+        "the two scenes seem identical",
+        "no change has occurred",
+        "almost nothing has changed",
+    ]
 
     id_to_word = {v: k for k, v in word_vocab.items()}
     special_tokens = {word_vocab["<START>"], word_vocab["<END>"], word_vocab["<NULL>"]}
+    unk_token = word_vocab.get("<UNK>", 1)
 
     print("Generating captions...")
     with torch.no_grad():
@@ -217,34 +231,56 @@ def test(model, encoder, encoder_trans, dataloader, word_vocab, device, verbose=
                 # Remove special tokens
                 pred_tokens = [t for t in generated if t not in special_tokens]
                 hypotheses.append(pred_tokens)
+                # Get ALL reference captions directly from dataset
+                dataset_idx = idx * dataloader.batch_size + i
+                sample_data = dataloader.dataset.samples[dataset_idx]
 
-                # Get reference (ground truth)
-                ref_tokens = input_seqs[i].cpu().tolist()
-                ref_tokens = [t for t in ref_tokens if t not in special_tokens]
-                references.append([ref_tokens])  # Wrap in list for BLEU evaluation
+                img_refs = []
+                # sample_data['sentences'] contains all captions for this image pair
+                for sent_data in sample_data["sentences"]:
+                    # Convert raw tokens to IDs
+                    ref_ids = [
+                        word_vocab.get(t, unk_token) for t in sent_data["tokens"]
+                    ]
+                    img_refs.append(ref_ids)
+
+                references.append(img_refs)
+
+                # Convert to string for change/no-change classification
+                pred_caption = " ".join(
+                    [id_to_word.get(t, "<UNK>") for t in pred_tokens]
+                )
+                ref_caption = " ".join(
+                    [id_to_word.get(t, "<UNK>") for t in img_refs[0]]
+                )
+
+                # Classify into change/no-change based on first reference caption
+                # print(ref_caption)
+                if ref_caption in nochange_list:
+                    nochange_references.append(img_refs)
+                    nochange_hypotheses.append(pred_tokens)
+                else:
+                    change_references.append(img_refs)
+                    change_hypotheses.append(pred_tokens)
 
                 # Print samples
                 if verbose and idx < 5 and i == 0:
-                    pred_caption = " ".join(
-                        [id_to_word.get(t, "<UNK>") for t in pred_tokens]
-                    )
-                    ref_caption = " ".join(
-                        [id_to_word.get(t, "<UNK>") for t in ref_tokens]
-                    )
                     print(f"\nSample {idx + 1}:")
-                    print(f"  Reference: {ref_caption}")
+                    print(f"  Reference (1 of {len(img_refs)}): {ref_caption}")
                     print(f"  Generated: {pred_caption}")
 
             if idx % 50 == 0:
                 print(f"Processed {idx}/{len(dataloader)} batches...")
 
     print(f"\nComputing evaluation metrics on {len(references)} samples...\n")
+    print(f"No-change samples: {len(nochange_references)}")
+    print(f"Change samples: {len(change_references)}\n")
 
-    # Compute metrics using pure Python
+    # Compute overall metrics
     metrics = evaluate_metrics(references, hypotheses, id_to_word)
 
     print("=" * 70)
-    print("TEST RESULTS")
+    print("OVERALL TEST RESULTS")
     print("=" * 70)
     print(f"BLEU-1:  {metrics['Bleu_1']:.4f}")
     print(f"BLEU-2:  {metrics['Bleu_2']:.4f}")
@@ -253,6 +289,38 @@ def test(model, encoder, encoder_trans, dataloader, word_vocab, device, verbose=
     print(f"METEOR:  {metrics['METEOR']:.4f}")
     print(f"ROUGE-L: {metrics['ROUGE_L']:.4f}")
     print("=" * 70)
+
+    # Compute no-change metrics
+    if len(nochange_references) > 0:
+        nochange_metrics = evaluate_metrics(
+            nochange_references, nochange_hypotheses, id_to_word
+        )
+        print("\n" + "=" * 70)
+        print("NO-CHANGE TEST RESULTS")
+        print("=" * 70)
+        print(f"BLEU-1:  {nochange_metrics['Bleu_1']:.4f}")
+        print(f"BLEU-2:  {nochange_metrics['Bleu_2']:.4f}")
+        print(f"BLEU-3:  {nochange_metrics['Bleu_3']:.4f}")
+        print(f"BLEU-4:  {nochange_metrics['Bleu_4']:.4f}")
+        print(f"METEOR:  {nochange_metrics['METEOR']:.4f}")
+        print(f"ROUGE-L: {nochange_metrics['ROUGE_L']:.4f}")
+        print("=" * 70)
+
+    # Compute change metrics
+    if len(change_references) > 0:
+        change_metrics = evaluate_metrics(
+            change_references, change_hypotheses, id_to_word
+        )
+        print("\n" + "=" * 70)
+        print("CHANGE TEST RESULTS")
+        print("=" * 70)
+        print(f"BLEU-1:  {change_metrics['Bleu_1']:.4f}")
+        print(f"BLEU-2:  {change_metrics['Bleu_2']:.4f}")
+        print(f"BLEU-3:  {change_metrics['Bleu_3']:.4f}")
+        print(f"BLEU-4:  {change_metrics['Bleu_4']:.4f}")
+        print(f"METEOR:  {change_metrics['METEOR']:.4f}")
+        print(f"ROUGE-L: {change_metrics['ROUGE_L']:.4f}")
+        print("=" * 70)
 
     return metrics
 

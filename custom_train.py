@@ -7,30 +7,7 @@ import json
 
 from data.LEVIR_CC.custom_dataset import ChangeDetectionCaptionDataset
 from model.model_encoder import Encoder, AttentiveEncoder
-
-
-class LSTMCaptionGeneratorModel(nn.Module):
-    def __init__(self, vocab_size, encoder_dim):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, 512)
-        self.input_encoder = nn.Linear(3 * encoder_dim, 512)
-        self.lstm = nn.LSTM(512, 512, batch_first=True)
-        self.output = nn.Linear(512, vocab_size)
-
-    def forward(self, img1, img2, input_seq):
-        B, C, H, W = img1.shape
-        f1 = nn.functional.adaptive_avg_pool2d(img1, 1).view(B, C)
-        f2 = nn.functional.adaptive_avg_pool2d(img2, 1).view(B, C)
-        img = torch.cat([f1, f2, f2 - f1], dim=1)
-        img = self.input_encoder(img)
-
-        embeddings = self.embedding(input_seq)
-        img = img.unsqueeze(1)
-        lstm_input = torch.cat([img, embeddings], dim=1)
-        hidden, _ = self.lstm(lstm_input)
-        out = self.output(hidden)
-        out = out[:, 1:, :]
-        return out
+from model.lstm_decoder import LSTMCaptionGeneratorModel
 
 
 def load_and_freeze_encoder(checkpoint_path, network='resnet101', encoder_dim=2048, 
@@ -262,7 +239,7 @@ def main():
     # Loss and optimizer
     loss_function = CrossEntropyLoss(ignore_index=0, reduction="mean")
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=LEARNING_RATE)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
     
     # Training loop
     best_val_acc = 0.0
@@ -285,8 +262,8 @@ def main():
         )
         
         # Update learning rate
-        scheduler.step()
-        print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}\n")
+        # scheduler.step()
+        # print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}\n")
         
         # Save best model
         if val_acc > best_val_acc:
@@ -302,7 +279,7 @@ def main():
                 'vocab_size': vocab_size,
                 'encoder_dim': ENCODER_DIM,
             }
-            save_path = os.path.join(SAVE_DIR, f'lstm_decoder_acc_t_{val_acc:.4f}.pth')
+            save_path = os.path.join(SAVE_DIR, f'lstm_decoder_acc_t_d_{val_acc:.4f}.pth')
             torch.save(checkpoint, save_path)
             print(f"✓ Saved best model: {save_path}\n")
     
