@@ -76,7 +76,7 @@ def train_epoch(
     nb_tr_steps = 0
     total_correct, total_predictions = 0, 0
 
-    for idx, batch in (enumerate(dataloader)):
+    for idx, batch in enumerate(dataloader):
         # Unpack batch (imgA, imgB, input_seqs, output_seqs, lengths)
         imgA, imgB, question, ans = batch
 
@@ -146,7 +146,7 @@ def validate(model, encoder, encoder_trans, dataloader, device, text_encoder):
     loss_function = BCEWithLogitsLoss()
 
     with torch.no_grad():
-        for imgA, imgB, question, ans in (dataloader):
+        for imgA, imgB, question, ans in dataloader:
             imgA = imgA.to(device)
             imgB = imgB.to(device)
             ans = ans.to(device)
@@ -199,6 +199,7 @@ def main():
     LEARNING_RATE = 1e-4
     NUM_EPOCHS = 50
     ENCODER_DIM = 2048
+    PATIENCE = 3
 
     # Create datasets
     train_dataset = LevirCCVQADataset(
@@ -254,7 +255,9 @@ def main():
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # Training loop
+    best_val_loss = float("inf")
     best_val_acc = 0.0
+    patience_counter = 0
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     for epoch in range(NUM_EPOCHS):
@@ -283,9 +286,11 @@ def main():
         scheduler.step()
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}\n")
 
-        # Save best model
-        if val_acc > best_val_acc:
+        # Save best model based on validation loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             best_val_acc = val_acc
+            patience_counter = 0
             checkpoint = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -295,11 +300,23 @@ def main():
                 "val_acc": val_acc,
                 "val_loss": val_loss,
             }
-            save_path = os.path.join(SAVE_DIR, f"vqa_acc_{val_acc:.4f}.pth")
+            save_path = os.path.join(SAVE_DIR, f"vqa_loss_{val_loss:.4f}.pth")
             torch.save(checkpoint, save_path)
-            print(f"✓ Saved best model: {save_path}\n")
+            print(f"✓ Saved best model (val loss): {save_path}\n")
+        else:
+            patience_counter += 1
+            print(
+                f"No improvement in val loss for {patience_counter} epoch(s). "
+                f"Patience: {PATIENCE}"
+            )
+            if patience_counter >= PATIENCE:
+                print("Early stopping triggered.\n")
+                break
 
-    print(f"Training complete! Best validation accuracy: {best_val_acc:.4f}")
+    print(
+        f"Training complete! Best validation loss: {best_val_loss:.4f} | "
+        f"Best validation accuracy: {best_val_acc:.4f}"
+    )
 
 
 if __name__ == "__main__":

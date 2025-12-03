@@ -86,7 +86,7 @@ def is_change_caption(caption_tokens, word2idx, nochange_list):
         if phrase.lower().strip() == caption_str.lower().strip():
             # print(f"Matched no-change phrase: '{phrase}'")
             return 0
-    
+
     # print("No match found in no-change list.")
     # print("\n")
     return 1
@@ -238,8 +238,8 @@ def main():
     print(f"Using device: {DEVICE}\n")
 
     # Paths
-    IMAGE_DIR = "/Users/ayushbhauwala/Documents/Columbia/Sem 1/DL for CV/project/experimenting/levir_cc/Levir-CC-dataset/images"
-    CAPTIONS_FILE = "/Users/ayushbhauwala/Documents/Columbia/Sem 1/DL for CV/project/experimenting/levir_cc/Levir-CC-dataset/LevirCCcaptions.json"
+    IMAGE_DIR = "/home/ab6106/Levir-CC-dataset/images"
+    CAPTIONS_FILE = "/home/ab6106/Levir-CC-dataset/LevirCCcaptions.json"
     VOCAB_FILE = "./data/LEVIR_CC/vocab.json"
     ENCODER_CHECKPOINT = "Pretrained_models/LEVIR_CC_batchsize_32_resnet101.pth"
     SAVE_DIR = "./models_checkpoint/"
@@ -250,6 +250,7 @@ def main():
     NUM_EPOCHS = 50
     MAX_SEQ_LEN = 50  # Fixed sequence length
     ENCODER_DIM = 2048
+    PATIENCE = 3
 
     # Load vocabulary
     with open(VOCAB_FILE, "r") as f:
@@ -312,7 +313,9 @@ def main():
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # Training loop
+    best_val_loss = float("inf")
     best_val_acc = 0.0
+    patience_counter = 0
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     for epoch in range(NUM_EPOCHS):
@@ -349,9 +352,11 @@ def main():
         scheduler.step()
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.6f}\n")
 
-        # Save best model
-        if val_acc > best_val_acc:
+        # Save best model based on validation loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             best_val_acc = val_acc
+            patience_counter = 0
             checkpoint = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -361,11 +366,25 @@ def main():
                 "val_acc": val_acc,
                 "val_loss": val_loss,
             }
-            save_path = os.path.join(SAVE_DIR, f"change_detector_acc_{val_acc:.4f}.pth")
+            save_path = os.path.join(
+                SAVE_DIR, f"change_detector_loss_{val_loss:.4f}.pth"
+            )
             torch.save(checkpoint, save_path)
-            print(f"✓ Saved best model: {save_path}\n")
+            print(f"✓ Saved best model (val loss): {save_path}\n")
+        else:
+            patience_counter += 1
+            print(
+                f"No improvement in val loss for {patience_counter} epoch(s). "
+                f"Patience: {PATIENCE}"
+            )
+            if patience_counter >= PATIENCE:
+                print("Early stopping triggered.\n")
+                break
 
-    print(f"Training complete! Best validation accuracy: {best_val_acc:.4f}")
+    print(
+        f"Training complete! Best validation loss: {best_val_loss:.4f} | "
+        f"Best validation accuracy: {best_val_acc:.4f}"
+    )
 
 
 if __name__ == "__main__":
