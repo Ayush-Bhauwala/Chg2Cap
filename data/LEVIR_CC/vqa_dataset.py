@@ -51,12 +51,59 @@ UNIVERSAL_QUESTIONS = {
     ],
 }
 
+UNSEEN_QUESTION_VARIANTS = {
+    "building_added": [
+        "Did any additional structures show up?",
+        "Were fresh buildings raised in the area?",
+        "Are there brand-new constructions now?",
+        "Has the skyline gained more buildings?",
+    ],
+    "building_removed": [
+        "Have any buildings vanished from the scene?",
+        "Were certain structures torn down recently?",
+        "Can you see fewer buildings than before?",
+        "Has demolition removed some buildings?",
+    ],
+    "road_added": [
+        "Was another roadway introduced here?",
+        "Did any fresh lanes get paved?",
+        "Is there an added street segment now?",
+        "Have transport routes expanded with a new road?",
+    ],
+    "vegetation_added": [
+        "Did new greenery sprout up?",
+        "Are extra plants or trees now visible?",
+        "Has foliage grown in places that were bare?",
+        "Were saplings or shrubs recently planted?",
+    ],
+    "vegetation_removed": [
+        "Were any trees cleared out?",
+        "Did the foliage get cut back?",
+        "Has plant life been stripped away?",
+        "Are there fewer green patches than before?",
+    ],
+    "no_change": [
+        "Does everything look essentially identical?",
+        "Is the scene virtually untouched?",
+        "Can you confirm the area stayed the same?",
+        "Were no noticeable alterations made?",
+    ],
+}
+
 
 class LevirCCVQADataset(Dataset):
-    def __init__(self, image_dir, semantic_labels_file, split, transform=None):
+    def __init__(
+        self,
+        image_dir,
+        semantic_labels_file,
+        split,
+        transform=None,
+        use_unseen_questions=False,
+    ):
         self.items = []
         self.image_dir = image_dir
         self.split = split
+        self.use_unseen_questions = use_unseen_questions
         self.mean = [100.6790, 99.5023, 84.9932]
         self.std = [50.9820, 48.4838, 44.7057]
         with open(semantic_labels_file, "r") as f:
@@ -69,9 +116,15 @@ class LevirCCVQADataset(Dataset):
             yes_questions = []
             no_questions = []
             for label, is_present in labels.items():
-                if( label not in UNIVERSAL_QUESTIONS):
+                if label not in UNIVERSAL_QUESTIONS:
                     continue
-                questions = UNIVERSAL_QUESTIONS[label]
+                questions = list(UNIVERSAL_QUESTIONS[label])
+                if (
+                    self.split == "test"
+                    and self.use_unseen_questions
+                    and label in UNSEEN_QUESTION_VARIANTS
+                ):
+                    questions.extend(UNSEEN_QUESTION_VARIANTS[label])
                 if is_present:
                     yes_questions.extend(questions)
                 else:
@@ -143,6 +196,7 @@ if __name__ == "__main__":
         image_dir="/home/ab6106/Levir-CC-dataset/images",
         semantic_labels_file="./data/LEVIR_CC/semantic_labels.json",
         split="train",
+        use_unseen_questions=False,
     )
     print(f"Dataset size: {len(dataset)}")
     for i in range(5):
@@ -152,7 +206,7 @@ if __name__ == "__main__":
         print(f"  Image B shape: {imgB.shape}")
         print(f"  Question: {question}")
         print(f"  Answer: {ans.item()}")
-    
+
     dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
     for batch in dataloader:
         imgA_batch, imgB_batch, questions_batch, ans_batch = batch

@@ -52,12 +52,10 @@ class VQAWithAttention(nn.Module):
         txt_expanded = txt_expanded.expand_as(img_features)
         
         # --- Step C: Spatial Attention ---
-        # 1. Combine Image and Text (Element-wise multiplication or addition)
-        # This "fuses" the question into the visual grid
+        # 1. Combine Image and Text (Element-wise multiplication)
         combined_features = img_features * txt_expanded 
         
         # 2. Calculate Attention Map: (Batch, 1, 8, 8)
-        # "Which pixels are relevant to this question?"
         attn_map = self.attn_layer(combined_features)
         attn_scores = F.softmax(attn_map.view(attn_map.size(0), -1), dim=1) # Softmax over H*W
         attn_scores = attn_scores.view(attn_map.size()) # Reshape back to (B, 1, 8, 8)

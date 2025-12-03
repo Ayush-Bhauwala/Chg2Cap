@@ -1,4 +1,5 @@
 import os
+import argparse
 import torch
 import json
 import numpy as np
@@ -168,7 +169,7 @@ def test_vqa(model, encoder, encoder_trans, dataloader, text_encoder, device):
     }
 
 
-def main():
+def main(use_unseen_questions=False):
     # Device
     DEVICE = "cpu"
     if torch.cuda.is_available():
@@ -209,9 +210,13 @@ def main():
         image_dir=IMAGE_DIR,
         semantic_labels_file=SEMANTIC_LABELS_FILE,
         split="test",
+        use_unseen_questions=use_unseen_questions,
     )
 
     print(f"Test samples: {len(test_dataset)}\n")
+    print(
+        "Using unseen question variants for test set: " f"{bool(use_unseen_questions)}"
+    )
 
     # Create dataloader
     test_loader = DataLoader(
@@ -245,4 +250,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="VQA testing script")
+    parser.add_argument(
+        "--use-unseen-questions",
+        action="store_true",
+        help="Include unseen paraphrased question variants in the test set",
+    )
+    args = parser.parse_args()
+    main(use_unseen_questions=args.use_unseen_questions)
